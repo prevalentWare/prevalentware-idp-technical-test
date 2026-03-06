@@ -131,7 +131,7 @@ Provide a command similar to:
 python main.py --input-dir ./images --output-file ./output/receipts_extracted.xlsx
 ```
 
-Your code must be reproducible from a clean environment.
+Your code must be reproducible from a clean environment, assuming there will be a .env with the variable OPENCODE_API_KEY.
 
 ## Important Constraints
 
