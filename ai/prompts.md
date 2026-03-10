@@ -1,411 +1,428 @@
-# Prompts Utilizados Durante el Desarrollo
+# AI Prompts — Receipt Data Extraction Pipeline
 
-Este archivo documenta todos los prompts empleados durante el desarrollo del proyecto
-**Receipt Data Extraction Pipeline**, como evidencia del flujo de trabajo AI-first requerido
-por la prueba técnica. Cada prompt incluye su propósito, el texto exacto utilizado y
-observaciones sobre el resultado obtenido.
+Documentación de todos los prompts utilizados durante el desarrollo del proyecto en esta sesión de OpenCode, incluyendo el proceso iterativo de mejora. Cada prompt está registrado en el orden cronológico exacto en que fue enviado.
 
 ---
 
-## 1. Initial Analysis Prompt
-
-**Purpose:** Analizar los requisitos de la prueba técnica y descomponer el problema en
-tareas concretas antes de escribir cualquier línea de código.
+## 1. Configuración inicial del repositorio
 
 ```
-Lee el siguiente README de una prueba técnica y ayúdame a:
-
-1. Identificar los requisitos ELIMINATORIOS (los que hacen inválida la entrega si no se cumplen).
-2. Descomponer el trabajo en módulos Python independientes con sus responsabilidades.
-3. Identificar las dependencias entre módulos.
-4. Señalar los riesgos técnicos más importantes (por ejemplo: manejo de errores de Tesseract,
-   variabilidad del JSON del LLM, imágenes de baja calidad).
-5. Proponer un orden de implementación que minimice el riesgo.
-
-README de la prueba:
-[contenido del README pegado aquí]
+Crea una carpeta llamada receipt_extractor, despues de crearla accede a ella y realiza un fork al siguiente repositorio de github https://github.com/prevalentWare/prevalentware-idp-technical-test.git
 ```
 
-**Resultado:** Se identificaron tres requisitos eliminatorios:
-- Usar OpenCode Harness (endpoint `/zen/v1/messages`) con `sonnet-4.6`.
-- Detección de orientación exclusivamente con Tesseract OSD (nunca con LLM).
-- Benchmark comparativo con un modelo OSS de OpenCode.
-
-Se definió el orden de implementación: `orientation.py` → `extractor.py` →
-`excel_writer.py` → `main.py` → `benchmark.py` → PDFs → README.
+```
+clona el sigiente repositorio https://github.com/HancyToro/prevalentware-idp-technical-test.git
+```
 
 ---
 
-## 2. Architecture Planning Prompt
-
-**Purpose:** Investigar la API de OpenCode Zen, sus dos endpoints y los formatos exactos
-de payload antes de implementar `src/extractor.py`.
+## 2. Creación de la estructura del proyecto
 
 ```
-Necesito implementar un cliente HTTP en Python para OpenCode Zen, que es un gateway
-de modelos AI con dos endpoints:
+Crea EXACTAMENTE esta estructura de directorios y archivos vacíos:
 
-1. Endpoint Anthropic-compatible (para Claude Sonnet 4.6):
-   - URL: https://opencode.ai/zen/v1/messages
-   - Auth header: "x-api-key": <api_key>
-   - Header requerido: "anthropic-version": "2023-06-01"
-   - Model ID: "claude-sonnet-4-6"
+receipt_extractor/
+├── main.py
+├── benchmark.py
+├── requirements.txt
+├── .env.example
+├── .gitignore
+├── README.md
+├── src/
+│   ├── __init__.py
+│   ├── orientation.py
+│   ├── extractor.py
+│   └── excel_writer.py
+├── images/
+├── output/
+├── benchmark/
+├── docs/
+└── ai/
+    ├── prompts.md
+    └── conversations/
 
-2. Endpoint OpenAI-compatible (para modelos OSS: qwen3-coder, glm-5, kimi-k2.5):
-   - URL: https://opencode.ai/zen/v1/chat/completions
-   - Auth header: "Authorization": "Bearer <api_key>"
+Para el archivo requirements.txt incluye estas dependencias:
+python-dotenv>=1.0.0
+Pillow>=10.0.0
+pytesseract>=0.3.10
+httpx>=0.27.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+reportlab>=4.0.0
 
-Para cada endpoint necesito saber:
-- El formato exacto del payload para enviar una imagen en base64 junto con un prompt de texto.
-- El path en la respuesta JSON donde está el texto generado.
-- Cómo manejar errores HTTP (4xx, 5xx) de forma robusta con httpx.
-
-Diseña dos funciones Python (_call_anthropic y _call_openai_compatible) con type
-annotations completas (Pylance standard), usando httpx.Client (no requests).
-Cada función debe retornar tuple[str, float] con el texto de respuesta y los segundos
-transcurridos.
+Para .env.example incluye:
+OPENCODE_API_KEY=your_api_key_here
 ```
-
-**Resultado:** Se definió la estructura de los dos helpers `_call_anthropic` y
-`_call_openai_compatible` con sus payloads, headers y rutas de extracción de respuesta.
-Se decidió usar `httpx.Client` como context manager para garantizar cierre de conexiones.
 
 ---
 
-## 3. Extraction Prompt (Producción)
-
-**Purpose:** Prompt enviado al LLM en cada llamada de extracción. Es el núcleo del
-pipeline: determina directamente la calidad y consistencia de los datos extraídos.
-
-### Texto completo del prompt
+## 3. Módulo src/orientation.py
 
 ```
-Eres un experto en lectura y análisis de documentos contables colombianos,
-especialmente recibos de caja menor, cuentas de cobro, remisiones y recibos de pago.
+Escribe el módulo src/orientation.py que maneja la detección y corrección de orientación de imágenes usando EXCLUSIVAMENTE Tesseract OSD. Esto es un requisito eliminatorio de la prueba: la rotación NO puede delegarse a un LLM.
 
-Analiza la imagen del documento y extrae todos los campos visibles.
-Devuelve ÚNICAMENTE un objeto JSON válido, sin bloques de código, sin markdown,
-sin texto adicional antes ni después del JSON.
+El módulo debe contener estas funciones:
 
-El JSON debe seguir EXACTAMENTE este esquema (usa null para campos ausentes):
+1. detect_rotation_angle(image: Image.Image) -> int
+2. correct_orientation(image: Image.Image, angle: int) -> Image.Image
+3. process_image_orientation(image_path: str | Path) -> tuple[Image.Image, int]
+4. get_image_files(input_dir: str | Path) -> list[Path]
 
-{
-  "ciudad": null,
-  "fecha": null,
-  "numero_recibo": null,
-  "pagado_a": null,
-  "valor": null,
-  "concepto": null,
-  "valor_en_letras": null,
-  "firma_recibido": null,
-  "cc_o_nit": null,
-  "codigo": null,
-  "aprobado": null,
-  "direccion": null,
-  "vendedor": null,
-  "telefono_fax": null,
-  "forma_pago": null,
-  "cantidad": null,
-  "detalle": null,
-  "valor_unitario": null,
-  "valor_total": null,
-  "total_documento": null,
-  "tipo_documento": null,
-  "plantilla_detectada": null
-}
-
-Reglas de extracción:
-- "fecha": formato DD/MM/YYYY. Si el documento trae otro formato, conviértelo.
-- "valor", "valor_unitario", "valor_total", "total_documento": solo el número,
-  sin símbolo "$" ni puntos de miles (ejemplo: 150000).
-- "tipo_documento": clasifica el documento en una de estas categorías:
-  "recibo de caja menor", "cuenta de cobro", "recibo de pago", "remisión", "pedido"
-  u otra descripción breve si no encaja en ninguna.
-- "plantilla_detectada": describe brevemente el formato visual del documento
-  (ejemplo: "recibo pre-impreso con logo", "recibo manuscrito",
-  "formato tabular con ítems").
-- Campos con varias líneas de texto: concaténalos con " | " como separador.
-- "firma_recibido": indica "Sí" si hay firma visible, "No" si no la hay.
-- "aprobado": nombre o iniciales de quien aprobó, si aparece en el documento.
-
-Extrae EXACTAMENTE lo que dice el documento, sin inventar datos.
+Usa logging estándar de Python en todo el módulo. Incluye docstrings completos. Importa Path de pathlib.
 ```
 
-### Análisis de las decisiones de diseño
-
-#### Idioma: español
-
-El prompt está íntegramente en español porque los documentos a analizar son recibos
-colombianos con terminología contable local. Los modelos de visión responden mejor
-cuando el idioma del prompt coincide con el idioma del documento: reduce ambigüedad
-en nombres de campo y mejora el mapeo semántico entre el texto visible y los campos
-del schema.
-
-#### Schema JSON explícito con los 22 campos
-
-Incluir el schema completo con todos los campos en `null` cumple tres funciones:
-
-1. **Previene nombres de campo inventados:** sin schema, los modelos tienden a usar
-   nombres propios (`importe`, `monto`, `beneficiario`) que rompen el parseo aguas
-   abajo. Con el schema explícito, el modelo sabe exactamente qué nombres usar.
-2. **Garantiza schema estable:** aunque el recibo no tenga un campo, ese campo aparece
-   en el output como `null`, lo que hace que todos los registros del DataFrame tengan
-   las mismas columnas.
-3. **Reduce tokens de razonamiento:** el modelo no necesita "inventar" la estructura,
-   solo rellenar los valores.
-
-#### "ÚNICAMENTE un objeto JSON válido, sin bloques de código, sin markdown"
-
-Esta instrucción explícita reduce los fallos de parseo. Sin ella, los modelos frecuentemente
-envuelven el JSON en bloques de código markdown (` ```json ... ``` `), especialmente los
-modelos OSS. Si bien el parser de `parse_extraction_response()` maneja este caso con
-su estrategia de limpieza de fences, es más eficiente prevenirlo en el prompt.
-
-#### `null` como valor por defecto (no cadena vacía, no `"N/A"`)
-
-`null` JSON se mapea directamente a `None` en Python y a celda vacía en pandas/Excel.
-Usar cadenas vacías o `"N/A"` generaría ruido en el output y complicaría la detección
-de campos realmente ausentes en el benchmark.
-
-#### Reglas de formato explícitas
-
-- **Fecha DD/MM/YYYY:** los recibos colombianos mezclan formatos (DD/MM/YYYY, D de Mes
-  de YYYY, fechas escritas en palabras). Sin la regla, cada modelo normaliza de forma
-  diferente, haciendo incomParable el campo entre registros.
-- **Valor sin `$` ni puntos de miles:** facilita la conversión a numérico en el pipeline
-  posterior sin lógica de limpieza adicional.
-- **Concatenación con ` | `:** algunos recibos tienen múltiples líneas en el mismo campo
-  (varios ítems de detalle). El separador ` | ` permite reconstruir la información sin
-  perder estructura.
-- **`tipo_documento` con categorías fijas:** ancla la clasificación a un vocabulario
-  controlado, lo que permite filtrado y agrupación en el Excel de salida.
-
-#### "Extrae EXACTAMENTE lo que dice el documento, sin inventar datos"
-
-Instrucción de cierre para contrarrestar la tendencia de los LLMs a "completar" o
-"inferir" información que no está explícitamente en la imagen. En documentos contables,
-un dato inventado es peor que un `null`.
+```
+Una cosa a mas a tener en cuenta, el codigo debe cumplir con las reglas de "standard" de pylance asi que modifica el codigo para que cumpla con estas espcificaciones
+```
 
 ---
 
-## 4. Prompt Engineering Iterations
-
-### Versión 1 — Prompt simple (descartado)
-
-**Fecha de iteración:** primera sesión de desarrollo  
-**Problema identificado:** nombres de campo inconsistentes entre imágenes
+## 4. Módulo src/extractor.py
 
 ```
-Analiza esta imagen de un recibo colombiano y extrae los datos en formato JSON.
-Incluye: fecha, número de recibo, nombre de quien recibe, monto, concepto,
-ciudad y cualquier otro campo relevante que encuentres.
+Escribe el módulo src/extractor.py que se conecta a la API de OpenCode Zen para extraer datos de recibos usando modelos LLM con visión.
+
+CONTEXTO TÉCNICO CRÍTICO sobre OpenCode Zen:
+- Claude Sonnet 4.6 usa el endpoint Anthropic-compatible: https://opencode.ai/zen/v1/messages
+  - Header de auth: "x-api-key": <api_key>
+  - Header requerido: "anthropic-version": "2023-06-01"
+  - Model ID: "claude-sonnet-4-6"
+- Los modelos OSS usan el endpoint OpenAI-compatible: https://opencode.ai/zen/v1/chat/completions
+  - Header de auth: "Authorization": "Bearer <api_key>"
+  - Modelos OSS disponibles: "qwen3-coder", "glm-5", "kimi-k2.5"
+
+El módulo debe contener:
+1. Constantes: ANTHROPIC_ENDPOINT, OPENAI_ENDPOINT, MODELS
+2. EXTRACTION_PROMPT optimizado para recibos colombianos
+3. image_to_base64(), _call_anthropic(), _call_openai_compatible()
+4. extract_receipt_data(), parse_extraction_response()
+5. _normalize_fields(), _empty_record()
+
+Usa httpx para las llamadas HTTP (NO requests). Usa logging estándar.
 ```
-
-**Problemas observados:**
-- El modelo usaba nombres de campo diferentes en cada respuesta:
-  `"monto"` / `"valor"` / `"importe"` / `"total"` para el mismo campo.
-- Campos no solicitados explícitamente aparecían con nombres inventados.
-- Algunos campos eran objetos anidados en lugar de strings.
-- Sin schema fijo, el DataFrame resultante tenía columnas distintas por imagen,
-  haciendo imposible la consolidación.
-
-**Decisión:** añadir schema JSON explícito en la siguiente versión.
 
 ---
 
-### Versión 2 — Con schema, sin reglas de formato (descartado)
-
-**Fecha de iteración:** segunda sesión de desarrollo  
-**Problema identificado:** markdown wrapping y formatos inconsistentes
+## 5. Módulo src/excel_writer.py
 
 ```
-Eres un experto en documentos contables colombianos.
+Escribe el módulo src/excel_writer.py que genera el archivo Excel consolidado con los datos extraídos.
 
-Extrae los datos de la imagen y devuelve SOLO este JSON con los valores encontrados
-(null si no está presente):
+El módulo debe contener:
+1. COLUMN_ORDER: Lista con el orden estable de columnas para el output
+2. generate_excel(records: list[dict], output_path: str | Path) -> Path
+   - Crea el directorio padre si no existe
+   - Convierte la lista de dicts a DataFrame de pandas
+   - Reordena las columnas
+   - Escribe a Excel con pd.ExcelWriter engine="openpyxl"
+   - Sheet name: "Receipts"
+   - Auto-ajusta el ancho de columnas basado en el contenido (max 50 caracteres)
+   - Retorna el Path del archivo generado
 
-{
-  "ciudad": null,
-  "fecha": null,
-  "numero_recibo": null,
-  "pagado_a": null,
-  "valor": null,
-  "concepto": null,
-  "valor_en_letras": null,
-  "firma_recibido": null,
-  "cc_o_nit": null,
-  "codigo": null,
-  "aprobado": null,
-  "direccion": null,
-  "vendedor": null,
-  "telefono_fax": null,
-  "forma_pago": null,
-  "cantidad": null,
-  "detalle": null,
-  "valor_unitario": null,
-  "valor_total": null,
-  "total_documento": null,
-  "tipo_documento": null,
-  "plantilla_detectada": null
-}
+Usa pandas y openpyxl. Incluye logging y docstrings.
 ```
-
-**Problemas observados:**
-- Schema funcionó bien con Sonnet 4.6: nombres de campo consistentes.
-- Con modelos OSS (qwen3-coder): respuesta envuelta en ` ```json ... ``` ` en ~15%
-  de los casos.
-- Fechas en formatos mixtos: `"15/03/2024"`, `"15 de marzo de 2024"`,
-  `"03-15-2024"` para la misma imagen dependiendo del modelo.
-- Valores monetarios incluían `"$"` y puntos: `"$150.000"` en lugar de `"150000"`.
-- `tipo_documento` con valores libres no estandarizados:
-  `"recibo"`, `"voucher"`, `"comprobante de pago"`.
-
-**Decisión:** añadir reglas de formato explícitas y reforzar la instrucción de JSON-only.
 
 ---
 
-### Versión 3 — Final con todas las reglas (en producción)
+## 6. Pipeline principal main.py
 
-**Fecha de adopción:** tercera sesión de desarrollo  
-**Estado:** en uso en `src/extractor.py` como `EXTRACTION_PROMPT`
+```
+Escribe main.py, el punto de entrada CLI del pipeline de extracción de recibos.
 
-Ver texto completo en la sección 3 de este documento.
+Debe usar argparse con estos argumentos:
+- --input-dir (default: "./images")
+- --output-file (default: "./output/receipts_extracted.xlsx")
+- --model (default: "sonnet-4.6", choices de MODELS.keys())
+- --verbose / -v (flag)
+- --timeout (default: 120.0)
 
-**Mejoras respecto a v2:**
-- Instrucción explícita: `"sin bloques de código, sin markdown"` → elimina el problema
-  de markdown wrapping en modelos OSS.
-- Regla de fecha DD/MM/YYYY con conversión explícita → fechas consistentes entre modelos.
-- Regla de valor sin `$` ni puntos → valores directamente convertibles a numérico.
-- Categorías fijas para `tipo_documento` → clasificación estandarizada.
-- Descripción de `plantilla_detectada` → campo de metadata útil para debugging.
-- Separador ` | ` para campos multi-línea → no se pierde información.
-- Frase de cierre `"sin inventar datos"` → reduce alucinaciones en campos vacíos.
+Flujo de main():
+1. Cargar variables de entorno con load_dotenv()
+2. Validar que OPENCODE_API_KEY existe. Si no, error y salir con código 1.
+3. Obtener lista de imágenes con get_image_files()
+4. Para cada imagen: Tesseract OSD → extracción con LLM → metadata → agregar a records
+5. Generar Excel con generate_excel()
+6. Imprimir resumen
 
-**Resultado con v3:**
-- Sonnet 4.6: ~98% de respuestas parseables directamente, schema completo.
-- Qwen3 Coder: ~85% parseables directamente, ~12% requieren limpieza de fences
-  (manejado por el parser), ~3% fallback a registro vacío.
+Logging format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+```
 
 ---
 
-## 5. Benchmark Analysis Prompts
-
-**Purpose:** Diseñar la estructura del benchmark comparativo y el análisis de resultados
-entre Claude Sonnet 4.6 y Qwen3 Coder 480B.
-
-### Prompt de diseño del benchmark
+## 7. Benchmark benchmark.py
 
 ```
-Necesito diseñar un benchmark comparativo entre dos modelos de visión para
-extracción de datos de recibos colombianos:
+Escribe benchmark.py que ejecuta una comparación entre Claude Sonnet 4.6 y un modelo OSS de OpenCode Zen.
 
-- Modelo A: Claude Sonnet 4.6 (vía endpoint Anthropic-compatible de OpenCode Zen)
-- Modelo B: Qwen3 Coder 480B (vía endpoint OpenAI-compatible de OpenCode Zen)
+CLI con argparse:
+- --input-dir (default: "./images")
+- --oss-model (default: "qwen3-coder")
+- --output-dir (default: "./benchmark")
 
-Ambos modelos reciben las mismas imágenes, el mismo prompt y el mismo schema JSON.
+Flujo:
+1. Cargar API key del entorno
+2. Obtener lista de imágenes
+3. Ejecutar extracción con sonnet-4.6 en TODAS las imágenes
+4. Ejecutar extracción con el modelo OSS en TODAS las imágenes
+5. Computar métricas por modelo
+6. Generar archivos de reporte
 
-Define:
-1. Las métricas cuantitativas más relevantes para comparar ambos modelos
-   (considerando que el objetivo es precisión en campos contables).
-2. Una métrica de "field agreement" para medir consistencia entre modelos en la
-   misma imagen.
-3. Los archivos de reporte a generar: CSV por imagen, JSON de métricas agregadas
-   y JSON de detalle completo por modelo.
-4. La estructura de un script benchmark.py con argparse, siguiendo las mismas
-   convenciones de main.py.
+CORE_FIELDS = ["ciudad", "fecha", "numero_recibo", "pagado_a", "valor", "concepto", "valor_en_letras", "tipo_documento"]
+
+Función run_extraction(), compute_metrics(), generate_benchmark_report()
+Genera: results.csv, metrics_summary.json, results_{model}.json
 ```
-
-**Resultado:** Se definieron las métricas: `success_rate`, `avg_fields_extracted`,
-`core_field_fill_rate`, `time_seconds (avg/min/max/total)` y `failure_patterns`.
-Se añadió `field_agreement` como cuenta de campos core con el mismo valor en ambos modelos
-(comparación case-insensitive).
-
-### Prompt de análisis comparativo para el PDF
-
-```
-Con base en los resultados del benchmark entre Claude Sonnet 4.6 y Qwen3 Coder 480B
-para extracción de recibos colombianos, redacta un análisis técnico en español que incluya:
-
-1. Resumen ejecutivo (2 párrafos): qué se comparó y hallazgos principales.
-2. Análisis de precisión: fortalezas y debilidades de cada modelo.
-3. Patrones de fallo observados para cada modelo.
-4. Tradeoff velocidad/costo con estimaciones para 1.000 y 10.000 recibos.
-5. Recomendación de arquitectura: cuál modelo usar en producción y por qué.
-   Justifica con al menos 5 razones técnicas específicas al dominio (recibos colombianos).
-6. Cuándo sería válido usar el modelo más barato (Qwen3).
-
-Contexto técnico:
-- Sonnet 4.6: input $3.00/1M tokens, output $15.00/1M tokens
-- Qwen3 Coder: input $0.45/1M tokens, output $1.50/1M tokens
-- Los recibos colombianos de caja menor mezclan texto impreso y manuscrito.
-- El campo "valor_en_letras" es frecuentemente manuscrito.
-```
-
-**Resultado:** Estructura del análisis adoptada para `benchmark/analysis.pdf`, con énfasis
-en la brecha de accuracy en campos manuscritos como argumento central para recomendar
-Sonnet 4.6 en producción.
 
 ---
 
-## 6. Ollama Local Pipeline Planning Prompts
-
-**Purpose:** Diseñar el plan técnico completo para un pipeline OCR local con Ollama
-como alternativa al pipeline cloud, para el entregable `docs/local-ollama-ocr-plan.pdf`.
-
-### Prompt de planificación de arquitectura
+## 8. Generación de PDFs
 
 ```
-Diseña un plan técnico detallado para reemplazar el pipeline cloud (OpenCode Zen +
-Claude Sonnet 4.6) con un pipeline completamente local usando Ollama y modelos
-open-source de visión.
+Escribe un script Python generate_analysis_pdf.py que genera el archivo benchmark/analysis.pdf usando reportlab.
 
-El pipeline actual tiene estos pasos:
-1. Detección de orientación con Tesseract OSD
-2. Corrección de rotación con PIL
-3. Extracción de datos con Claude Sonnet 4.6 vía API HTTP
-4. Parseo y normalización del JSON
-5. Generación de Excel
+Estructura del documento:
+1. TÍTULO: "Benchmark Analysis: Claude Sonnet 4.6 vs Qwen3 Coder 480B"
+2. EXECUTIVE SUMMARY
+3. METHODOLOGY
+4. COMPARISON TABLE con datos reales de costos de OpenCode Zen:
+   - Sonnet 4.6: input $3.00/1M, output $15.00/1M
+   - Qwen3 Coder: input $0.45/1M, output $1.50/1M
+5. ACCURACY ANALYSIS
+6. FAILURE PATTERNS
+7. SPEED AND COST TRADEOFFS
+8. ARCHITECTURE AND ENGINEERING RECOMMENDATIONS
+9. CONCLUSION
 
-Para el plan local, necesito:
-1. Comparativa de modelos disponibles en Ollama con capacidad de visión para
-   documentos en español (con VRAM requerida).
-2. Pasos de preprocesamiento adicionales recomendados para modelos locales
-   (que son más sensibles a la calidad de imagen).
-3. Cómo llamar a Ollama vía su API HTTP local.
-4. Estrategia de prompting para modelos locales (few-shot, temperatura, reintentos).
-5. Validación de la salida JSON.
-6. Requisitos de hardware mínimos y recomendados.
-7. Riesgos principales y sus mitigaciones.
-8. Plan de rollout en fases (desde PoC hasta producción).
-
-El contexto es extracción de recibos de caja menor colombianos, con mezcla de
-texto impreso y manuscrito, formatos variados, calidad de imagen variable.
+Estilo visual: headers con color #1a1a2e, tablas con grid gris y filas alternas, tamaño carta (letter).
 ```
 
-**Resultado:** Plan de 10 secciones adoptado para el documento
-`docs/local-ollama-ocr-plan.pdf`, con LLaVA 1.6 34B como recomendación primaria y
-Llama 3.2 Vision 11B como fallback. Las 4 fases del rollout van de PoC (2 semanas)
-a mejora continua (ongoing).
-
-### Prompt de selección de modelo local
-
 ```
-Para un pipeline local de extracción de datos de recibos colombianos con Ollama,
-compara estos modelos de visión disponibles:
-- LLaVA 1.6 (13B y 34B)
-- Moondream 2 (1.8B)
-- Llama 3.2 Vision (11B y 90B)
+Escribe un script Python generate_ollama_plan_pdf.py que genera docs/local-ollama-ocr-plan.pdf usando reportlab.
 
-Para cada uno, evalúa:
-1. Capacidad de visión para documentos de baja calidad con texto manuscrito.
-2. Soporte de español y comprensión de terminología contable colombiana.
-3. VRAM mínima requerida.
-4. Latencia esperada en RTX 3090.
-5. Idoneidad para producción con recibos reales.
-
-Recomienda el modelo primario y un fallback, justificando la elección.
+Estructura:
+1. TÍTULO: "Local OCR Pipeline Plan with Ollama"
+2. OVERVIEW
+3. ARCHITECTURE (9 pasos)
+4. MODEL SELECTION (tabla comparativa: LLaVA 1.6 34B, LLaVA 1.6 13B, Moondream 2, Llama 3.2 Vision 11B, Llama 3.2 Vision 90B)
+5. PREPROCESSING STEPS (8 pasos con OpenCV)
+6. EXTRACTION STRATEGY (Ollama HTTP API)
+7. VALIDATION STRATEGY (6 capas)
+8. INFRASTRUCTURE REQUIREMENTS (tabla mínimos/recomendados)
+9. RISKS AND MITIGATIONS (tabla 6 riesgos)
+10. ROLLOUT PLAN (4 fases)
+11. CONCLUSION
 ```
 
-**Resultado:** LLaVA 1.6 34B seleccionado como recomendación primaria por su balance
-entre precisión en texto manuscrito y hardware accesible (RTX 3090, 24 GB VRAM).
-Llama 3.2 Vision 11B como fallback para hardware con menor VRAM (8 GB).
+```
+el texto debe estar en español
+```
+
+---
+
+## 9. README.md
+
+```
+Escribe el README.md del proyecto receipt-extractor. Debe estar en español y ser claro para el evaluador.
+
+Incluir estas secciones:
+1. TÍTULO Y DESCRIPCIÓN
+2. REQUISITOS DEL SISTEMA (Python 3.10+, Tesseract OCR con comandos para Ubuntu/macOS/Windows, OpenCode Zen API Key)
+3. INSTALACIÓN (git clone, venv, pip install, cp .env.example)
+4. USO (comando principal, opciones, benchmark)
+5. FLUJO DE PROCESAMIENTO (5 pasos numerados)
+6. CAMPOS EXTRAÍDOS (principales, adicionales, metadata)
+7. ESTRUCTURA DEL PROYECTO
+8. NOTAS TÉCNICAS
+```
+
+---
+
+## 10. Archivo ai/prompts.md
+
+```
+Crea el archivo ai/prompts.md que documenta todos los prompts usados durante el desarrollo.
+
+Estructura:
+1. INITIAL ANALYSIS PROMPT
+2. ARCHITECTURE PLANNING PROMPT
+3. EXTRACTION PROMPT (PRODUCTION) con explicación de por qué cada parte está diseñada así
+4. PROMPT ENGINEERING ITERATIONS (3 versiones)
+5. BENCHMARK ANALYSIS PROMPTS
+6. OLLAMA LOCAL PIPELINE PLANNING PROMPTS
+```
+
+---
+
+## 11. Entorno virtual y dependencias
+
+```
+Crear el venv, ademas si ves que se necesita agregar librerias a requirements.txt hazlo, despues de tener el archivo actualizado con todas las librerias instala las librerias. cuando crees este entorno realizo con python 3.10 que tengo en el sistema
+```
+
+```
+Revisa el codigo entero ya que se estan presentado unos problemas como "Import dotenv could not be resolved" como estos hay varios conflitos de librerias que se estan presentando resuelvelos
+```
+
+---
+
+## 12. Ejecución y verificación del pipeline
+
+```
+Ejecuta el pipeline con una sola imagen para verificar que funciona end-to-end:
+python main.py --input-dir ./images --output-file ./output/test_single.xlsx --verbose
+```
+
+```
+ya instale el tesseract, agrega las lineas anteriores al documento src/orientation.py y despues ejecuta lo siguiente:
+python main.py --input-dir ./images --output-file ./output/test_single.xlsx --verbose
+```
+
+```
+Ejecuta el pipeline completo de extracción con todas las imágenes en ./images:
+python main.py --input-dir ./images --output-file ./output/receipts_extracted.xlsx --verbose
+```
+
+---
+
+## 13. Mejoras al prompt de extracción (v2 → v3)
+
+```
+Contexto del problema. Ejecuté el pipeline de extracción con las 13 imágenes y el modelo sonnet-4.6 tiene errores recurrentes:
+
+numero_recibo: Confunde el dígito "0" con letras como "G" o "O". Ejemplo: sacó "G025" en vez de "0025".
+ciudad: Confunde "Itagüí" con "Ibagué", "Yaguí", "Bogotá", "Yopal".
+pagado_a (nombres): Confunde apellidos. Puso "Pastrano" y "Pacheco" cuando el correcto era "Restrepo".
+concepto: Confunde "mensajería" con "masajista" o "masajera".
+valor_en_letras: Mal lectura. Puso "Doce y Seismil" cuando el documento dice "Diez y seis mil".
+vendedor: Inventó un nombre "Juan Eduardo Rastro" que no existe en el documento.
+firma_recibido: En un documento con firma visible, sacó "No".
+
+Tu tarea: Reescribe completamente src/extractor.py con estas mejoras:
+Mejora 1: Agregar Tesseract pre-OCR como herramienta auxiliar (tesseract_pre_ocr())
+Mejora 2: Reescribir EXTRACTION_PROMPT con reglas críticas por campo
+Mejora 3: Actualizar extract_receipt_data() para ejecutar pre-OCR antes de la llamada al API
+```
+
+---
+
+## 14. Correcciones adicionales al prompt
+
+```
+Hay algunos cambios que hay que realizar en el documento src/extractor.py:
+- En el archivo WhatsApp Image 2026-03-02 at 18.16.55 (1) el numero de recibo es 0040 y escribio 0440
+- En las imagenes en el campo concepto aparecen unos numeros, esos no van en el fax
+- En la columna cc_o_nit van solo numeros, agrega que este valor esta siempre donde se dice cc o nit
+- En la imagen WhatsApp Image 2026-03-02 at 18.17.16 si va el numero 0038 pero se coloco 0030
+- Agrega también en el prompt que si no aparece recibo de caja menor o cuenta de cobro en la imagen este campo debe ir vacio
+```
+
+```
+Unos errores a corregir en el prompt:
+1. Se debe colocar en la instruccion de extraccion del numero de recibo que solo se acepta numeros no letras. G025 debe ser 0025.
+2. Copia lo que esta en total_documento en valor_total.
+3. en las imagenes esta el campo "pagado a" o "Señor(es)" si el campo no trae nada debe ir null, solo debe aceptar strings no numeros.
+```
+
+---
+
+## 15. Corrección de orientación de imágenes
+
+```
+Revisa las imagenes y el resultado que se obtuvo hay algunos problemas aun por resolver. Las imagenes se estan rotando hacia la derecha, las imagenes estan quedando volteadas. Seria de rotarla en -90° o en 270° para que quede de manera correcta. Corrige esto en el archivo src/orientation.py
+```
+
+---
+
+## 16. Benchmark comparativo
+
+```
+Ejecuta el benchmark comparativo entre Sonnet 4.6 y Qwen3 Coder:
+python benchmark.py --input-dir ./images --oss-model qwen3-coder
+```
+
+```
+Es verdad el modelo de minimax m2.5 no tiene para procesar imagenes pero el que si tiene es el de kimi k2.5 asi que modifica los codigos necesarios para que el benchmark funcione con este modelo
+```
+
+```
+Sucede que el modelo de minimaz m2.5 no tiene para procesar imagenes pero el que si tiene es el de kimi k2.5 asi que modifica los archivos necesarios para cambiar el de minimax m2.5 por el de kimi k2.5 como modelo opensource y asi correr el benchmark
+```
+
+---
+
+## 17. Solución al problema de Kimi K2.5 (thinking model)
+
+```
+Problema: Kimi K2.5 devuelve HTTP 200 pero en vez de JSON puro, responde con razonamiento en texto libre tipo "El usuario quiere que analice..." y nunca produce el JSON final. El parser actual no puede extraer campos → 0/22 en todos los registros.
+
+Modifica src/extractor.py con estos 3 cambios:
+Cambio 1: Agregar system message en _call_openai_compatible()
+Cambio 2: Manejar reasoning_content en la respuesta
+Cambio 3: Reescribir parse_extraction_response() con 4 estrategias:
+  - Strategy 1: json.loads directo
+  - Strategy 2: Code fences con regex
+  - Strategy 3: Bracket matching inteligente
+  - Strategy 4: Last resort first/last brace
+```
+
+---
+
+## 18. Generación de PDFs finales
+
+```
+modifica el documento generate_analysis_pdf.py ya que antes estaba hecho con qwen y se debe cambiar por kimi k2.5 y de paso genera el pdf
+```
+
+```
+Genera los dos PDFs entregables:
+python generate_analysis_pdf.py
+python generate_ollama_plan_pdf.py
+
+Si los scripts de generación de PDF necesitan datos reales del benchmark (que ahora tenemos en benchmark/metrics_summary.json), actualiza los scripts para que lean esos datos y los incluyan en las tablas del PDF.
+```
+
+---
+
+## 19. Revisión final antes del push
+
+```
+Haz una revisión final del repositorio completo antes de hacer push:
+1. Verifica que NO hay API keys hardcodeadas en ningún archivo
+2. Verifica que .env está en .gitignore
+3. Verifica que todos los archivos requeridos existen
+4. Verifica que el README tiene el comando de ejecución correcto
+5. Muéstrame un tree del proyecto final
+```
+
+```
+listo corre las tareas y procesos e implementa los cambios que sean necesarios
+```
+
+---
+
+## 20. Documentación de evidencia AI
+
+```
+Crea el archivo ai/prompts.md con el siguiente contenido exacto [estructura de 8 secciones con prompts, versiones iterativas y técnicas de prompting]
+```
+
+```
+opencode tui --session ses_330b0339effeD72C6Jtlxatlu1al archivo ai/prompts.md deben ir todos los prompts que escribi en esta session cada uno de ellos no dejes ninguno por fuera agregalos todos desde el principio de esta session
+```
+
+---
+
+## Técnicas de Prompting Utilizadas en esta Sesión
+
+1. **Requisitos exhaustivos**: Cada prompt de construcción incluía la firma de funciones, tipos de retorno y restricciones técnicas explícitas
+2. **Schema-first**: Dar la estructura JSON exacta con los 22 campos antes de pedir la extracción
+3. **Negative instructions**: "NUNCA inventes datos", "Sin markdown, sin bloques de código", "La rotación NO puede delegarse a un LLM"
+4. **Confusion tables**: Listar explícitamente las confusiones carácter→carácter (0↔G↔O, 1↔l↔I, 2↔7)
+5. **Domain context**: Ciudades colombianas, apellidos comunes, terminología contable local
+6. **Cross-validation**: Inyectar texto OCR auxiliar (Tesseract) para que el LLM valide su lectura
+7. **Iterative refinement**: 3 versiones del prompt de extracción, cada una corrigiendo errores reales observados en ejecución
+8. **Anti-hallucination**: "NUNCA inventes, supongas ni completes datos que no puedas leer claramente"
+9. **System message**: Para modelos thinking (Kimi K2.5), suprimir chain-of-thought con `role: system`
+10. **Pylance compliance**: Requerir explícitamente que el código cumpla con `typeCheckingMode: standard`
+11. **Error-driven refinement**: Proporcionar el error exacto observado (G025 en vez de 0025) para correcciones precisas
+12. **Verificación empírica**: Ejecutar el pipeline real con las 13 imágenes para detectar errores antes de documentarlos
