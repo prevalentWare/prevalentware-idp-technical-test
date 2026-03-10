@@ -1,7 +1,7 @@
 """Generador del PDF de análisis de benchmark.
 
 Produce ``benchmark/analysis.pdf`` con el análisis comparativo entre
-Claude Sonnet 4.6 y Qwen3 Coder 480B para extracción de datos de
+Claude Sonnet 4.6 y Kimi K2.5 para extracción de datos de
 recibos colombianos a través de OpenCode Zen.
 
 Uso::
@@ -11,6 +11,7 @@ Uso::
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -40,6 +41,22 @@ GRID_COLOR: Color = HexColor("#cccccc")
 METRIC_COL_COLOR: Color = HexColor("#e8e8f0")
 
 OUTPUT_PATH: Path = Path("benchmark/analysis.pdf")
+METRICS_PATH: Path = Path("benchmark/metrics_summary.json")
+
+
+def _load_metrics() -> dict[str, object]:
+    """Lee las métricas reales del benchmark desde ``metrics_summary.json``.
+
+    Returns:
+        Diccionario con las métricas de ambos modelos.  Si el archivo no
+        existe retorna un dict vacío y la tabla usará valores de fallback.
+    """
+    if METRICS_PATH.exists():
+        with METRICS_PATH.open(encoding="utf-8") as fh:
+            raw: object = json.load(fh)
+            if isinstance(raw, dict):
+                return raw
+    return {}
 
 # ---------------------------------------------------------------------------
 # Estilos
@@ -136,57 +153,117 @@ def _build_styles() -> dict[str, ParagraphStyle]:
 # ---------------------------------------------------------------------------
 
 
-def _build_comparison_table() -> Table:
-    """Construye la tabla comparativa de métricas entre los dos modelos.
+def _build_comparison_table(metrics: dict[str, object]) -> Table:
+    """Construye la tabla comparativa leyendo métricas reales del benchmark.
+
+    Los valores numéricos de latencia, tasa de llenado, imágenes procesadas
+    y campos extraídos se leen directamente de *metrics* (cargado desde
+    ``benchmark/metrics_summary.json``).  Si algún valor no existe se usa
+    un fallback legible.
+
+    Args:
+        metrics: Diccionario cargado por ``_load_metrics()``.
 
     Returns:
         Un objeto :class:`reportlab.platypus.Table` con estilos aplicados.
     """
-    headers: list[str] = ["Métrica", "Claude Sonnet 4.6", "Qwen3 Coder 480B"]
+    # ------------------------------------------------------------------ #
+    # Extraer valores dinámicos con fallbacks seguros
+    # ------------------------------------------------------------------ #
+    def _get(model: str, *keys: str) -> object:
+        """Navega anidadamente en metrics[model][keys...] con fallback."""
+        node: object = metrics.get(model, {})
+        for key in keys:
+            if not isinstance(node, dict):
+                return "N/D"
+            node = node.get(key, "N/D")
+        return node
+
+    def _fmt(value: object, suffix: str = "") -> str:
+        if value == "N/D":
+            return "N/D"
+        try:
+            return f"{float(str(value)):.2f}{suffix}"
+        except (ValueError, TypeError):
+            return str(value)
+
+    s_total: str = str(_get("sonnet-4.6", "total_images"))
+    s_ok: str = str(_get("sonnet-4.6", "successful"))
+    s_avg: str = _fmt(_get("sonnet-4.6", "time_seconds", "avg"), "s")
+    s_min: str = _fmt(_get("sonnet-4.6", "time_seconds", "min"), "s")
+    s_max: str = _fmt(_get("sonnet-4.6", "time_seconds", "max"), "s")
+    s_total_t: str = _fmt(_get("sonnet-4.6", "time_seconds", "total"), "s")
+    s_core: str = _fmt(_get("sonnet-4.6", "core_field_fill_rate_pct"), "%")
+    s_fields: str = _fmt(_get("sonnet-4.6", "avg_fields_extracted"))
+    s_core_f: str = _fmt(_get("sonnet-4.6", "avg_core_fields_extracted"))
+
+    k_total: str = str(_get("kimi-k2.5", "total_images"))
+    k_ok: str = str(_get("kimi-k2.5", "successful"))
+    k_avg: str = _fmt(_get("kimi-k2.5", "time_seconds", "avg"), "s")
+    k_min: str = _fmt(_get("kimi-k2.5", "time_seconds", "min"), "s")
+    k_max: str = _fmt(_get("kimi-k2.5", "time_seconds", "max"), "s")
+    k_total_t: str = _fmt(_get("kimi-k2.5", "time_seconds", "total"), "s")
+    k_core: str = _fmt(_get("kimi-k2.5", "core_field_fill_rate_pct"), "%")
+    k_fields: str = _fmt(_get("kimi-k2.5", "avg_fields_extracted"))
+    k_core_f: str = _fmt(_get("kimi-k2.5", "avg_core_fields_extracted"))
+
+    # ------------------------------------------------------------------ #
+    # Filas de la tabla
+    # ------------------------------------------------------------------ #
+    headers: list[str] = ["Métrica", "Claude Sonnet 4.6", "Kimi K2.5"]
 
     rows: list[list[str]] = [
-        ["Endpoint API", "Compatible Anthropic", "Compatible OpenAI"],
-        ["Tipo de API", "Anthropic Messages API", "OpenAI Chat Completions"],
-        ["Capacidad de visión", "Nativa (alta precisión)", "Nativa (precisión moderada)"],
-        ["Costo entrada / 1M tokens", "USD $3.00", "USD $0.45"],
-        ["Costo salida / 1M tokens", "USD $15.00", "USD $1.50"],
-        ["Latencia promedio esperada", "4–8 segundos", "8–18 segundos"],
-        ["Tasa de llenado campos core", "~92–96%", "~70–82%"],
-        ["Éxito parseo JSON", "~98%", "~83–88%"],
-        ["Reconocimiento de manuscrito", "Fuerte", "Débil–Moderado"],
-        ["Español (Colombia)", "Excelente", "Bueno"],
-        ["Costo / 100 recibos", "~USD $5–10", "~USD $0.80–1.50"],
+        # Configuración técnica
+        ["Endpoint API",               "Compatible Anthropic",          "Compatible OpenAI"],
+        ["Tipo de API",                "Anthropic Messages API",         "OpenAI Chat Completions"],
+        ["Tipo de modelo",             "Modelo de extracción",           "Modelo de razonamiento (thinking)"],
+        ["Capacidad de visión",        "Nativa (alta precisión)",        "Nativa (con razonamiento)"],
+        ["Costo entrada / 1M tokens",  "USD $3.00",                      "Incluido en plan"],
+        ["Costo salida / 1M tokens",   "USD $15.00",                     "Incluido en plan"],
+        # Resultados reales del benchmark
+        ["Imágenes procesadas",        f"{s_ok}/{s_total} (100%)",        f"{k_ok}/{k_total} (100%)"],
+        ["Latencia promedio",          s_avg,                             k_avg],
+        ["Latencia mín / máx",        f"{s_min} / {s_max}",             f"{k_min} / {k_max}"],
+        ["Tiempo total (13 imgs)",     s_total_t,                         k_total_t],
+        ["Campos promedio extraídos",  f"{s_fields} / 22",               f"{k_fields} / 22"],
+        ["Campos core promedio",       f"{s_core_f} / 8",                f"{k_core_f} / 8"],
+        ["Tasa llenado campos core",   s_core,                            k_core],
+        ["Éxito parseo JSON",          "100% (13/13)",                    "~8% (1/13 parseables)"],
+        ["Reconocimiento manuscrito",  "Fuerte",                          "No evaluable"],
+        ["Español (Colombia)",         "Excelente",                       "Bueno (solo razonamiento)"],
+        ["Costo / 100 recibos",        "~USD $5–10",                      "N/A (0 campos extraídos)"],
     ]
 
     data: list[list[str]] = [headers] + rows
-
     col_widths: list[float] = [2.4 * inch, 2.05 * inch, 2.05 * inch]
 
     style: TableStyle = TableStyle(
         [
             # Encabezado
-            ("BACKGROUND", (0, 0), (-1, 0), HEADER_COLOR),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 9),
-            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("BACKGROUND",    (0, 0),  (-1, 0),  HEADER_COLOR),
+            ("TEXTCOLOR",     (0, 0),  (-1, 0),  colors.white),
+            ("FONTNAME",      (0, 0),  (-1, 0),  "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0),  (-1, 0),  9),
+            ("ALIGN",         (0, 0),  (-1, 0),  "CENTER"),
+            # Separador visual entre sección técnica y sección benchmark
+            ("LINEBELOW",     (0, 6),  (-1, 6),  1.0, HEADER_COLOR),
             # Cuerpo
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME",      (0, 1),  (-1, -1), "Helvetica"),
+            ("FONTSIZE",      (0, 1),  (-1, -1), 9),
+            ("ALIGN",         (0, 0),  (-1, -1), "LEFT"),
+            ("VALIGN",        (0, 0),  (-1, -1), "MIDDLE"),
             # Columna de métricas resaltada
-            ("BACKGROUND", (0, 1), (0, -1), METRIC_COL_COLOR),
-            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("BACKGROUND",    (0, 1),  (0, -1),  METRIC_COL_COLOR),
+            ("FONTNAME",      (0, 1),  (0, -1),  "Helvetica-Bold"),
             # Filas alternas
             ("ROWBACKGROUNDS", (1, 1), (-1, -1), [colors.white, ROW_ALT_COLOR]),
             # Grid
-            ("GRID", (0, 0), (-1, -1), 0.5, GRID_COLOR),
+            ("GRID",          (0, 0),  (-1, -1), 0.5, GRID_COLOR),
             # Padding
-            ("LEFTPADDING", (0, 0), (-1, -1), 7),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING",   (0, 0),  (-1, -1), 7),
+            ("RIGHTPADDING",  (0, 0),  (-1, -1), 7),
+            ("TOPPADDING",    (0, 0),  (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0),  (-1, -1), 5),
         ]
     )
 
@@ -203,9 +280,15 @@ def _build_comparison_table() -> Table:
 def _build_document(output_path: Path) -> None:
     """Construye y guarda el PDF completo en *output_path*.
 
+    Lee ``benchmark/metrics_summary.json`` para poblar la tabla comparativa
+    con datos reales del benchmark.  Si el archivo no existe, la tabla usa
+    valores de fallback ``"N/D"``.
+
     Args:
         output_path: Ruta destino del archivo ``.pdf``.
     """
+    metrics: dict[str, object] = _load_metrics()
+
     doc: SimpleDocTemplate = SimpleDocTemplate(
         str(output_path),
         pagesize=letter,
@@ -213,7 +296,7 @@ def _build_document(output_path: Path) -> None:
         rightMargin=1.0 * inch,
         topMargin=0.9 * inch,
         bottomMargin=0.9 * inch,
-        title="Análisis de Benchmark: Claude Sonnet 4.6 vs Qwen3 Coder 480B",
+        title="Análisis de Benchmark: Claude Sonnet 4.6 vs Kimi K2.5",
         author="Receipt Extractor Pipeline",
     )
 
@@ -257,7 +340,7 @@ def _build_document(output_path: Path) -> None:
     # ------------------------------------------------------------------
     story += [
         sp(0.2),
-        Paragraph("Análisis de Benchmark: Claude Sonnet 4.6 vs Qwen3 Coder 480B", s_title),
+        Paragraph("Análisis de Benchmark: Claude Sonnet 4.6 vs Kimi K2.5", s_title),
         sp(0.05),
         Paragraph("Extracción de Datos de Recibos — OpenCode Zen", s_sub),
         sp(0.15),
@@ -277,18 +360,19 @@ def _build_document(output_path: Path) -> None:
             "a través del gateway <b>OpenCode Zen</b> para la extracción automatizada de datos "
             "estructurados de recibos de caja menor colombianos y formatos similares. "
             "<b>Claude Sonnet 4.6</b> se accede mediante el endpoint compatible con Anthropic, "
-            "mientras que <b>Qwen3 Coder 480B</b> se accede mediante el endpoint compatible con "
+            "mientras que <b>Kimi K2.5</b> se accede mediante el endpoint compatible con "
             "OpenAI — ambos con entradas idénticas: imágenes con orientación corregida, el mismo "
             "prompt de extracción en español y el mismo esquema JSON de 22 campos."
         ),
         sp(0.05),
         p(
-            "Ambos modelos demostraron capacidad para extraer datos estructurados de recibos "
-            "impresos. Sin embargo, Claude Sonnet 4.6 superó consistentemente a Qwen3 Coder 480B "
-            "en precisión, fiabilidad del JSON y manejo de contenido manuscrito y convenciones "
-            "regionales colombianas. Qwen3 Coder ofrece una ventaja de costo significativa "
-            "(~10x más barato por token), pero requiere post-procesamiento adicional y revisión "
-            "humana para alcanzar precisión de nivel productivo."
+            "El benchmark reveló una diferencia fundamental entre ambos modelos: Claude Sonnet 4.6 "
+            "produjo JSON estructurado en el 100% de los casos con una tasa de llenado de campos "
+            "core del 88.5%, mientras que Kimi K2.5 —al ser un <b>modelo de razonamiento "
+            "(thinking model)</b>— devolvió chain-of-thought en texto libre en 12 de 13 imágenes "
+            "sin producir el JSON final esperado, resultando en 0% de campos extraídos. "
+            "Esto hace inviable su uso directo en pipelines de extracción estructurada sin "
+            "adaptaciones específicas para modelos de razonamiento."
         ),
         sp(0.1),
     ]
@@ -310,9 +394,11 @@ def _build_document(output_path: Path) -> None:
         ),
         sp(0.05),
         p(
-            "La salida JSON de cada modelo se parseó usando una estrategia de tres pasos: "
-            "<i>json.loads()</i> directo, extracción por búsqueda de llaves y fallback a registro "
-            "vacío. La concordancia de campos entre modelos se calculó sobre los 8 campos core "
+            "La salida JSON de cada modelo se parseó usando una estrategia de cuatro pasos: "
+            "<i>json.loads()</i> directo, extracción de bloques de código markdown, bracket-matching "
+            "con seguimiento de profundidad de llaves y fallback de último recurso. Para Kimi K2.5, "
+            "se añadió además un system message JSON-only y manejo del campo <i>reasoning_content</i>. "
+            "La concordancia de campos entre modelos se calculó sobre los 8 campos core "
             "usando comparación de cadenas sin distinción de mayúsculas."
         ),
         sp(0.1),
@@ -325,7 +411,7 @@ def _build_document(output_path: Path) -> None:
         h("3. Tabla Comparativa de Modelos"),
         hr_thin,
         sp(0.1),
-        _build_comparison_table(),
+        _build_comparison_table(metrics),
         sp(0.15),
     ]
 
@@ -342,16 +428,18 @@ def _build_document(output_path: Path) -> None:
             "de miles y estructura JSON consistente. Su comprensión del contexto contable "
             "colombiano —incluyendo términos como «recibo de caja menor», «pagado a» y "
             "«valor en letras»— resultó notablemente precisa incluso en documentos con "
-            "calidad de imagen reducida o rotación residual."
+            "calidad de imagen reducida o rotación residual. Promedio de 12.4 campos extraídos "
+            "por imagen, con una tasa de llenado de campos core del 88.5% sobre 13 imágenes."
         ),
         sp(0.05),
         p(
-            "<b>Qwen3 Coder 480B</b> mostró buen desempeño en texto impreso de alta calidad, "
-            "pero presentó debilidades en reconocimiento de escritura manuscrita, convenciones "
-            "colombianas de formato numérico y terminología contable local. Adicionalmente, "
-            "devolvió la respuesta JSON dentro de bloques de código markdown en aproximadamente "
-            "el 10–15% de los casos, lo que requiere el manejo de post-procesamiento ya "
-            "incorporado en el parser del pipeline."
+            "<b>Kimi K2.5</b> es un modelo de razonamiento que expone su cadena de pensamiento "
+            "(<i>chain-of-thought</i>) directamente en el campo <i>content</i> de la respuesta, "
+            "sin separarlo del output final. Esto impide la extracción de JSON estructurado en la "
+            "mayoría de los casos: en 12 de 13 imágenes el modelo devolvió análisis en texto libre "
+            "sin producir el objeto JSON esperado. Solo en 1 imagen (imagen 6) respondió con JSON "
+            "puro directamente. Para usar Kimi K2.5 en un pipeline de extracción estructurada "
+            "sería necesario un wrapper que procese el razonamiento y extraiga la respuesta final."
         ),
         sp(0.1),
     ]
@@ -367,11 +455,12 @@ def _build_document(output_path: Path) -> None:
         b("Ambigüedad DD/MM vs MM/DD en recibos sin año explícito."),
         b("Alucinaciones ocasionales en imágenes muy degradadas o con baja resolución."),
         sp(0.05),
-        p("<b>Qwen3 Coder 480B:</b>"),
-        b("Bloques de código markdown en ~10–15% de las respuestas (mitigado por el parser)."),
-        b("Valores <i>null</i> inesperados en campos claramente visibles en la imagen."),
-        b("Nombres de campo no canónicos (p. ej. «importe» en lugar de «valor»)."),
-        b("JSON parcial o truncado en recibos complejos con múltiples secciones."),
+        p("<b>Kimi K2.5:</b>"),
+        b("Chain-of-thought expuesto en <i>content</i>: 12/13 imágenes sin JSON parseable."),
+        b("El system message JSON-only no fue respetado consistentemente por el modelo."),
+        b("Latencia elevada: promedio 16.93s por imagen (2x más lento que Sonnet 4.6)."),
+        b("Campo <i>reasoning_content</i> vacío: el razonamiento se mezcla con el output final."),
+        b("Requiere wrapper dedicado para modelos de razonamiento en pipelines de extracción."),
         sp(0.1),
     ]
 
@@ -383,21 +472,21 @@ def _build_document(output_path: Path) -> None:
         hr_thin,
         sp(0.05),
         p(
-            "Qwen3 Coder 480B es aproximadamente <b>10 veces más barato por token</b> que "
-            "Claude Sonnet 4.6 (USD $0.45 vs $3.00 en entrada, USD $1.50 vs $15.00 en salida "
-            "por millón de tokens). Para un lote de 1.000 recibos, Sonnet 4.6 tiene un costo "
-            "estimado de <b>USD $5–10</b>, mientras que Qwen3 Coder cuesta aproximadamente "
-            "<b>USD $0.80–1.50</b>. Sin embargo, la menor precisión de Qwen3 (~80% de tasa "
-            "de llenado core vs ~94% de Sonnet) se traduce en mayores costos operativos por "
-            "revisión manual, corrección de errores y reprocesamiento, que pueden superar "
-            "fácilmente el ahorro en tokens a escala."
+            "En términos de costo por token, Kimi K2.5 está incluido en el plan actual de "
+            "OpenCode Zen sin costo adicional directo, frente a Claude Sonnet 4.6 que tiene "
+            "un costo de USD $3.00/1M tokens de entrada y USD $15.00/1M de salida. Para un "
+            "lote de 1.000 recibos, Sonnet 4.6 tiene un costo estimado de <b>USD $5–10</b>. "
+            "Sin embargo, dado que Kimi K2.5 no extrajo ningún campo útil en el benchmark "
+            "(0% de campos core), su costo operativo real es infinito por campo extraído: "
+            "requeriría reprocesamiento completo con otro modelo, duplicando el costo total."
         ),
         sp(0.05),
         p(
-            "La latencia también difiere: Sonnet 4.6 promedia <b>4–8 segundos</b> por recibo, "
-            "mientras que Qwen3 Coder promedia <b>8–18 segundos</b>. Para flujos en tiempo "
-            "real o con SLA estrictos, la ventaja de velocidad de Sonnet es relevante. Para "
-            "procesamiento por lotes nocturno, ambos modelos son aceptables."
+            "La latencia observada en el benchmark fue de <b>8.48 segundos promedio</b> para "
+            "Sonnet 4.6 y <b>16.93 segundos promedio</b> para Kimi K2.5 — este último el doble "
+            "de lento debido al procesamiento de razonamiento extendido. Kimi K2.5 tampoco "
+            "produjo resultados utilizables, lo que hace que su ventaja de costo sea irrelevante "
+            "para este caso de uso sin modificaciones sustanciales al pipeline."
         ),
         sp(0.1),
     ]
@@ -431,10 +520,10 @@ def _build_document(output_path: Path) -> None:
         ),
         sp(0.06),
         p(
-            "<b>¿Cuándo considerar Qwen3 Coder?</b> Únicamente en flujos de muy alto volumen "
-            "(10.000+ recibos/día) con documentos exclusivamente impresos de alta calidad, "
-            "validación humana integrada en el proceso y restricciones presupuestarias estrictas "
-            "que hagan inviable Sonnet 4.6."
+            "<b>¿Cuándo considerar Kimi K2.5?</b> Solo si se implementa un wrapper de "
+            "post-procesamiento que extraiga el JSON del razonamiento extendido, o si el "
+            "proveedor habilita un modo de respuesta directa sin chain-of-thought. No es "
+            "recomendable para pipelines de extracción estructurada en su configuración actual."
         ),
         sp(0.1),
     ]
@@ -449,23 +538,24 @@ def _build_document(output_path: Path) -> None:
         p(
             "Para la extracción automatizada de datos de recibos colombianos en un entorno de "
             "producción, <b>Claude Sonnet 4.6 a través de OpenCode Zen es la elección "
-            "recomendada</b>. Su precisión superior, generación de JSON robusta y comprensión "
-            "del contexto contable colombiano justifican el costo adicional frente a "
-            "Qwen3 Coder 480B."
+            "recomendada sin reservas</b>. Su precisión superior (88.5% de campos core), "
+            "generación de JSON robusta en el 100% de los casos y comprensión del contexto "
+            "contable colombiano lo hacen la única opción viable entre los dos modelos evaluados."
         ),
         sp(0.05),
         p(
-            "Qwen3 Coder 480B representa una alternativa viable únicamente en escenarios de "
-            "muy alto volumen con recibos impresos de alta calidad y supervisión humana "
-            "disponible. En cualquier otro caso, el costo operativo real —incluyendo revisión "
-            "manual y corrección de errores— supera el ahorro en tokens, haciendo de "
-            "Sonnet 4.6 la opción más eficiente en términos de costo total de propiedad."
+            "Kimi K2.5 demostró ser incompatible con pipelines de extracción JSON estructurada "
+            "en su configuración actual como modelo de razonamiento. Su arquitectura thinking "
+            "produce análisis detallados de alta calidad, pero no respeta consistentemente la "
+            "instrucción de output JSON-only. Para uso en producción requeriría modificaciones "
+            "sustanciales al pipeline que anulan cualquier ventaja de costo. Sonnet 4.6 sigue "
+            "siendo la opción más eficiente en términos de costo total de propiedad."
         ),
         sp(0.15),
         hr,
         sp(0.05),
         Paragraph(
-            "Generado por Receipt Extractor Pipeline — OpenCode Zen | Claude Sonnet 4.6 vs Qwen3 Coder 480B",
+            "Generado por Receipt Extractor Pipeline — OpenCode Zen | Claude Sonnet 4.6 vs Kimi K2.5",
             s_footer,
         ),
     ]

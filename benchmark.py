@@ -10,7 +10,7 @@ produces three artefacts in the output directory:
 
 Usage::
 
-    python benchmark.py --input-dir ./images --oss-model qwen3-coder --output-dir ./benchmark
+    python benchmark.py --input-dir ./images --oss-model kimi-k2.5 --output-dir ./benchmark
 """
 
 from __future__ import annotations
@@ -139,7 +139,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--oss-model",
-        default="qwen3-coder",
+        default="kimi-k2.5",
         choices=OSS_MODELS,
         help="Open-source model to benchmark against sonnet-4.6.",
     )

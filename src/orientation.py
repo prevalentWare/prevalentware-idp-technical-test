@@ -16,6 +16,13 @@ import pytesseract
 from pytesseract import TesseractError
 
 # ---------------------------------------------------------------------------
+# Tesseract path (Windows)
+# ---------------------------------------------------------------------------
+pytesseract.pytesseract.tesseract_cmd = (
+    r"C:\Users\Usuario\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+)
+
+# ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
 
@@ -103,9 +110,15 @@ def detect_rotation_angle(image: Image.Image) -> int:
 def correct_orientation(image: Image.Image, angle: int) -> Image.Image:
     """Rotate an image to correct its orientation based on the OSD angle.
 
-    Tesseract OSD reports the angle by which the text *is already rotated*
-    from upright.  To restore the image to the correct orientation the
-    inverse rotation ``(360 - angle)`` must be applied.
+    Tesseract OSD reports the angle by which the text is already rotated
+    clockwise from upright.  PIL ``image.rotate()`` applies positive values
+    counter-clockwise and negative values clockwise, so the correction is
+    ``-angle`` (clockwise rotation equal to the detected angle).
+
+    Examples:
+        - OSD angle 90  → ``rotate(-90)``  (90° clockwise)
+        - OSD angle 180 → ``rotate(-180)`` (180°, same in both directions)
+        - OSD angle 270 → ``rotate(-270)`` (270° clockwise = 90° counter-clockwise)
 
     Args:
         image: A PIL ``Image.Image`` to correct.
@@ -120,11 +133,11 @@ def correct_orientation(image: Image.Image, angle: int) -> Image.Image:
         logger.debug("No rotation correction needed (angle=0)")
         return image
 
-    correction: int = 360 - angle
+    correction: int = -angle
     corrected: Image.Image = image.rotate(correction, expand=True)
     logger.info(
-        "Applied rotation correction: -%d° (OSD angle was %d°)",
-        angle,
+        "Applied rotation correction: %d° (OSD angle was %d°)",
+        correction,
         angle,
     )
     return corrected

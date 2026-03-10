@@ -63,7 +63,7 @@ python main.py --input-dir ./images --output-file ./output/receipts_extracted.xl
 |---|---|---|
 | `--input-dir` | `./images` | Directorio con las imágenes a procesar |
 | `--output-file` | `./output/receipts_extracted.xlsx` | Archivo Excel de salida |
-| `--model` | `sonnet-4.6` | Modelo a usar (`sonnet-4.6`, `qwen3-coder`, `glm-5`, `kimi-k2.5`) |
+| `--model` | `sonnet-4.6` | Modelo a usar (`sonnet-4.6`, `kimi-k2.5`) |
 | `--timeout` | `120.0` | Timeout en segundos para cada llamada a la API |
 | `--verbose` / `-v` | `False` | Activar logging de nivel DEBUG |
 
@@ -71,7 +71,7 @@ python main.py --input-dir ./images --output-file ./output/receipts_extracted.xl
 
 ```bash
 # Usar modelo OSS
-python main.py --model qwen3-coder --verbose
+python main.py --model kimi-k2.5 --verbose
 
 # Timeout personalizado
 python main.py --timeout 180 --input-dir ./images
@@ -83,14 +83,14 @@ python main.py --help
 ### Benchmark comparativo
 
 ```bash
-python benchmark.py --input-dir ./images --oss-model qwen3-coder
+python benchmark.py --input-dir ./images --oss-model kimi-k2.5
 ```
 
 El benchmark ejecuta el pipeline completo con `sonnet-4.6` y con el modelo OSS seleccionado, y genera los siguientes reportes en `./benchmark/`:
 
 - `results.csv` — comparación por imagen con columna `field_agreement`
 - `metrics_summary.json` — métricas agregadas de ambos modelos
-- `results_sonnet-4.6.json` / `results_qwen3-coder.json` — detalle completo por modelo
+- `results_sonnet-4.6.json` / `results_kimi-k2.5.json` — detalle completo por modelo
 
 ### Generar PDFs de análisis
 
@@ -110,7 +110,7 @@ Por cada imagen en el directorio de entrada:
 
 1. **Detección de orientación** — Tesseract OSD (`--psm 0`) detecta el ángulo de rotación de la imagen. Si la imagen es demasiado pequeña, se escala antes del análisis. La rotación **nunca se delega a un LLM**.
 
-2. **Corrección de rotación** — Se aplica la rotación inversa `(360 - ángulo)` con PIL `image.rotate(expand=True)`. También se aplica `ImageOps.exif_transpose()` para manejar metadatos EXIF de cámara.
+2. **Corrección de rotación** — Se aplica la rotación `-ángulo` (horaria) con PIL `image.rotate(expand=True)`. También se aplica `ImageOps.exif_transpose()` para manejar metadatos EXIF de cámara.
 
 3. **Extracción con LLM** — La imagen corregida se codifica en base64 (máx. 1568px) y se envía a OpenCode Zen con el prompt de extracción en español. El modelo devuelve un objeto JSON con los 22 campos del schema.
 
@@ -175,7 +175,7 @@ prevalentware-idp-technical-test/
 │   ├── results.csv                # Comparación por imagen de ambos modelos
 │   ├── metrics_summary.json       # Métricas agregadas del benchmark
 │   ├── results_sonnet-4.6.json    # Detalle completo del modelo Sonnet
-│   ├── results_qwen3-coder.json   # Detalle completo del modelo OSS
+│   ├── results_kimi-k2.5.json     # Detalle completo del modelo OSS
 │   └── analysis.pdf               # Análisis escrito con recomendación de modelo
 │
 ├── docs/
@@ -194,7 +194,7 @@ prevalentware-idp-technical-test/
 
 - **Endpoint Anthropic-compatible para Sonnet 4.6:** las llamadas a `claude-sonnet-4-6` usan `POST https://opencode.ai/zen/v1/messages` con headers `x-api-key` y `anthropic-version: 2023-06-01`.
 
-- **Endpoint OpenAI-compatible para modelos OSS:** los modelos `qwen3-coder`, `glm-5` y `kimi-k2.5` usan `POST https://opencode.ai/zen/v1/chat/completions` con header `Authorization: Bearer <api_key>`.
+- **Endpoint OpenAI-compatible para modelos OSS:** el modelo `kimi-k2.5` usa `POST https://opencode.ai/zen/v1/chat/completions` con header `Authorization: Bearer <api_key>`.
 
 - **Redimensionado de imágenes:** antes de enviar al API, las imágenes se redimensionan a un máximo de 1568px en el lado más largo para garantizar compatibilidad con los límites de los endpoints de visión.
 
