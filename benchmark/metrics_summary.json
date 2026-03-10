@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-03-09T23:55:08.972892+00:00",
+  "models_compared": [
+    "sonnet-4.6",
+    "kimi-k2.5"
+  ],
+  "sonnet-4.6": {
+    "model": "sonnet-4.6",
+    "total_images": 13,
+    "successful": 13,
+    "failed": 0,
+    "success_rate_pct": 100.0,
+    "time_seconds": {
+      "total": 110.24,
+      "avg": 8.48,
+      "min": 5.79,
+      "max": 11.95
+    },
+    "avg_fields_extracted": 12.4,
+    "avg_core_fields_extracted": 7.1,
+    "core_field_fill_rate_pct": 88.5,
+    "failure_patterns": []
+  },
+  "kimi-k2.5": {
+    "model": "kimi-k2.5",
+    "total_images": 13,
+    "successful": 13,
+    "failed": 0,
+    "success_rate_pct": 100.0,
+    "time_seconds": {
+      "total": 220.04,
+      "avg": 16.93,
+      "min": 13.84,
+      "max": 26.06
+    },
+    "avg_fields_extracted": 0.0,
+    "avg_core_fields_extracted": 0.0,
+    "core_field_fill_rate_pct": 0.0,
+    "failure_patterns": []
+  }
+}
